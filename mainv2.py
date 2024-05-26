@@ -1,84 +1,52 @@
+import tensorflow as tf
+from tensorflow.keras.applications import VGG16
+from tensorflow.keras.applications.vgg16 import preprocess_input, decode_predictions
 import numpy as np
-from keras.preprocessing.image import ImageDataGenerator
-from keras.models import Model, load_model
-from keras.layers import Dense, GlobalAveragePooling2D, Dropout, Flatten
-from keras.applications import VGG16
-from keras.applications.vgg16 import preprocess_input
-from keras.optimizers import Adam
-from keras.preprocessing import image
+import cv2
 
-# مسیر داده‌ها
-train_data_dir = 'path_to_train_data'  # مسیر داده‌های آموزشی
-validation_data_dir = 'path_to_validation_data'  # مسیر داده‌های اعتبارسنجی
+# بارگذاری مدل VGG16 با وزن‌های پیش‌آموزش داده شده
+model = VGG16(weights='imagenet')
 
-# پارامترهای اصلی
-img_width, img_height = 224, 224
-batch_size = 32
-epochs = 25
-num_classes = 10  # تعداد کلاس‌ها (آفات)
+def load_and_preprocess_image(image_path):
+    # بارگذاری تصویر و تغییر اندازه آن به 224x224 پیکسل
+    image = cv2.imread(image_path)
+    image = cv2.resize(image, (224, 224))
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image = np.expand_dims(image, axis=0)
+    image = preprocess_input(image)
+    return image
 
-# آماده‌سازی داده‌ها
-train_datagen = ImageDataGenerator(
-    preprocessing_function=preprocess_input,
-    shear_range=0.2,
-    zoom_range=0.2,
-    horizontal_flip=True)
+def predict(image):
+    # پیش‌بینی نوع آفت با استفاده از مدل
+    preds = model.predict(image)
+    decoded_preds = decode_predictions(preds, top=3)[0]
+    return decoded_preds
 
-validation_datagen = ImageDataGenerator(preprocessing_function=preprocess_input)
+def draw_predictions(image_path, predictions):
+    # بارگذاری تصویر اصلی
+    image = cv2.imread(image_path)
+    height, width = image.shape[:2]
 
-train_generator = train_datagen.flow_from_directory(
-    train_data_dir,
-    target_size=(img_width, img_height),
-    batch_size=batch_size,
-    class_mode='categorical')
+    # رسم پیش‌بینی‌ها روی تصویر
+    for i, (imagenet_id, label, score) in enumerate(predictions):
+        text = f"{label}: {score:.2f}"
+        y = 30 + i * 30
+        cv2.putText(image, text, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-validation_generator = validation_datagen.flow_from_directory(
-    validation_data_dir,
-    target_size=(img_width, img_height),
-    batch_size=batch_size,
-    class_mode='categorical')
+    # ذخیره تصویر خروجی
+    output_path = 'output_with_predictions.jpg'
+    cv2.imwrite(output_path, image)
+    return output_path
 
-# بارگذاری مدل VGG16
-base_model = VGG16(weights='imagenet', include_top=False, input_shape=(img_width, img_height, 3))
+# مسیر تصویر ورودی
+image_path = 'path_to_your_image.jpg'
 
-# افزودن لایه‌های جدید به مدل
-x = base_model.output
-x = Flatten()(x)
-x = Dense(512, activation='relu')(x)
-x = Dropout(0.5)(x)
-predictions = Dense(num_classes, activation='softmax')(x)
+# بارگذاری و پیش‌پردازش تصویر
+image = load_and_preprocess_image(image_path)
 
-# ساخت مدل نهایی
-model = Model(inputs=base_model.input, outputs=predictions)
+# پیش‌بینی نوع آفت در تصویر
+predictions = predict(image)
 
-# فریز کردن لایه‌های اولیه VGG16
-for layer in base_model.layers:
-    layer.trainable = False
-
-# کامپایل کردن مدل
-model.compile(optimizer=Adam(lr=0.0001), loss='categorical_crossentropy', metrics=['accuracy'])
-
-# آموزش مدل
-model.fit(
-    train_generator,
-    steps_per_epoch=train_generator.samples // batch_size,
-    validation_steps=validation_generator.samples // batch_size,
-    epochs=epochs,
-    validation_data=validation_generator)
-
-# ذخیره مدل آموزش دیده
-model.save('plant_pest_detector_vgg16.h5')
-
-# تابع پیش‌بینی
-def predict_pest(img_path):
-    model = load_model('plant_pest_detector_vgg16.h5')
-    img = image.load_img(img_path, target_size=(img_width, img_height))
-    x = image.img_to_array(img)
-    x = np.expand_dims(x, axis=0)
-    x = preprocess_input(x)
-
-    preds = model.predict(x)
-    print('Predicted:', np.argmax(preds[0]))
-
-# نمونه فراخوانی تابع پیش‌بینی
-predict_pest('path_to_test_image.jpg')
+# رسم نتایج پیش‌بینی شده روی تصویر
+output_path = draw_predictions(image_path, predictions)
+print(f"نتایج پیش‌بینی شده در تصویر ذخیره شده در: {output_path}")
